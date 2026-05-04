@@ -82,6 +82,7 @@ test_script:
   - ps: |
       Write-Host "=== RDP ĐÃ SẴN SÀNG ==="
       Write-Host "Mật khẩu RDP: $env:APPVEYOR_RDP_PASSWORD"
+      Add-AppveyorMessage -Message "Mật khẩu RDP: $env:APPVEYOR_RDP_PASSWORD" -Category Information
       
       if ($env:NGROK_AUTH_TOKEN -ne "") {
           Write-Host "=== KÍCH HOẠT NGROK TUNNEL ==="
@@ -90,17 +91,21 @@ test_script:
           C:\ngrok.exe authtoken $env:NGROK_AUTH_TOKEN
           Start-Process -FilePath "C:\ngrok.exe" -ArgumentList "tcp 3389" -WindowStyle Hidden
           Start-Sleep -Seconds 5
-          $ngrokUrl = (Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels").tunnels[0].public_url
-          Write-Host "Ngrok RDP URL: $ngrokUrl"
+          try {
+              $ngrokUrl = (Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels").tunnels[0].public_url
+              Write-Host "Ngrok RDP URL: $ngrokUrl"
+              Add-AppveyorMessage -Message "Ngrok RDP URL: $ngrokUrl" -Category Information
+          } catch {
+              Write-Host "Lỗi khi lấy Ngrok URL."
+          }
       }
       
-      Write-Host "Hệ thống hỗ trợ treo tối đa 6 TIẾNG (360 Phút). Dữ liệu tự động lưu mỗi phút."
+      Write-Host "Hệ thống hỗ trợ treo tối đa theo giới hạn gói AppVeyor của bạn (Mặc định 60 phút, tối đa 360). Dữ liệu tự động lưu mỗi phút."
       
       $persistDir = "C:\Persistence"
       $staging = "C:\Staging"
       if (!(Test-Path $staging)) { New-Item -ItemType Directory -Path $staging -Force | Out-Null }
       
-      # Tích hợp Anti-AFK đơn giản bằng cách mô phỏng phím F15
       $wsh = New-Object -ComObject WScript.Shell
       
       for ($i = 1; $i -le 360; $i++) {
@@ -139,3 +144,13 @@ test_script:
           
           Start-Sleep -Seconds 60
       }
+
+on_finish:
+  - ps: |
+      Write-Host "=== LƯU TRỮ DỮ LIỆU LÊN ARTIFACTS TRƯỚC KHI TẮT MÁY ==="
+      $persistDir = "C:\Persistence"
+      if (Test-Path "$persistDir\ChromeProfile.zip") { Push-AppveyorArtifact "$persistDir\ChromeProfile.zip" -FileName "ChromeProfile_Backup.zip" }
+      if (Test-Path "$persistDir\Protect.zip") { Push-AppveyorArtifact "$persistDir\Protect.zip" -FileName "Protect_DPAPI_Backup.zip" }
+      if (Test-Path "$persistDir\AppProfile.zip") { Push-AppveyorArtifact "$persistDir\AppProfile.zip" -FileName "AppProfile_Backup.zip" }
+      if (Test-Path "$persistDir\RegistryBackup.reg") { Push-AppveyorArtifact "$persistDir\RegistryBackup.reg" -FileName "Registry_Backup.reg" }
+      Write-Host "✓ Toàn bộ dữ liệu đã được nén và đẩy lên mục Artifacts của AppVeyor."
