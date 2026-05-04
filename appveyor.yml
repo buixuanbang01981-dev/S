@@ -1,4 +1,4 @@
-version: 4.1.{build}
+version: 5.0.{build}
 image: Visual Studio 2019
 
 environment:
@@ -6,6 +6,7 @@ environment:
   APP_NAME: Antigravity
   APP_DOWNLOAD_URL: https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/1.23.2-4781536860569600/windows-x64/Antigravity.exe
   APPVEYOR_SAVE_CACHE_ON_ERROR: true
+  NGROK_AUTH_TOKEN: "" # Điền token ngrok của bạn vào đây nếu muốn dùng ngrok tunnel
 
 cache:
   - C:\Persistence -> appveyor.yml
@@ -13,10 +14,20 @@ cache:
 
 init:
   - ps: iex ((new-object net.webclient).DownloadString('https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1'))
+  - ps: |
+      Write-Host "=== TỐI ƯU HÓA HỆ THỐNG (Performance Booster) ==="
+      # Tắt Windows Defender để giải phóng CPU và RAM
+      Set-MpPreference -DisableRealtimeMonitoring $true
+      Set-MpPreference -DisableBehaviorMonitoring $true
+      Set-MpPreference -DisableBlockAtFirstSight $true
+      Set-MpPreference -DisableIOAVProtection $true
+      # Tắt dịch vụ không cần thiết
+      Stop-Service -Name "wsearch" -Force -WarningAction SilentlyContinue | Out-Null
+      Set-Service -Name "wsearch" -StartupType Disabled -WarningAction SilentlyContinue | Out-Null
 
 install:
   - ps: |
-      Write-Host "=== HỆ THỐNG KHÔI PHỤC DỮ LIỆU V4.1 (Tối ưu hóa Tốc độ) ==="
+      Write-Host "=== HỆ THỐNG KHÔI PHỤC DỮ LIỆU V5.0 (Ultimate Edition) ==="
       $persistDir = "C:\Persistence"
       if (!(Test-Path $persistDir)) { New-Item -ItemType Directory -Path $persistDir -Force | Out-Null }
 
@@ -58,6 +69,12 @@ install:
           Write-Host "> Đang tải ứng dụng $env:APP_NAME..."
           Invoke-WebRequest -UseBasicParsing -Uri $env:APP_DOWNLOAD_URL -OutFile $appExe
       }
+      
+      # Tạo Shortcut ra Desktop cho tiện sử dụng
+      $WshShell = New-Object -comObject WScript.Shell
+      $Shortcut = $WshShell.CreateShortcut("$env:USERPROFILE\Desktop\$env:APP_NAME.lnk")
+      $Shortcut.TargetPath = $appExe
+      $Shortcut.Save()
 
 build: off
 
@@ -65,17 +82,33 @@ test_script:
   - ps: |
       Write-Host "=== RDP ĐÃ SẴN SÀNG ==="
       Write-Host "Mật khẩu RDP: $env:APPVEYOR_RDP_PASSWORD"
-      Write-Host "Dữ liệu sẽ được tự động sao lưu mỗi PHÚT."
+      
+      if ($env:NGROK_AUTH_TOKEN -ne "") {
+          Write-Host "=== KÍCH HOẠT NGROK TUNNEL ==="
+          Invoke-WebRequest -UseBasicParsing -Uri "https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip" -OutFile "C:\ngrok.zip"
+          & 7z x "C:\ngrok.zip" -oC:\ -y | Out-Null
+          C:\ngrok.exe authtoken $env:NGROK_AUTH_TOKEN
+          Start-Process -FilePath "C:\ngrok.exe" -ArgumentList "tcp 3389" -WindowStyle Hidden
+          Start-Sleep -Seconds 5
+          $ngrokUrl = (Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels").tunnels[0].public_url
+          Write-Host "Ngrok RDP URL: $ngrokUrl"
+      }
+      
+      Write-Host "Hệ thống hỗ trợ treo tối đa 6 TIẾNG (360 Phút). Dữ liệu tự động lưu mỗi phút."
       
       $persistDir = "C:\Persistence"
       $staging = "C:\Staging"
       if (!(Test-Path $staging)) { New-Item -ItemType Directory -Path $staging -Force | Out-Null }
       
-      for ($i = 1; $i -le 60; $i++) {
+      # Tích hợp Anti-AFK đơn giản bằng cách mô phỏng phím F15
+      $wsh = New-Object -ComObject WScript.Shell
+      
+      for ($i = 1; $i -le 360; $i++) {
           $time = Get-Date -Format "HH:mm:ss"
-          Write-Host "[$time] Session hoạt động... (Phút $i/60)"
+          Write-Host "[$time] Session hoạt động... (Phút $i/360)"
           
-          Write-Host "--- Sao lưu định kỳ (phút $i) ---"
+          # Gửi phím F15 để chống ngủ đông (Anti-AFK)
+          $wsh.SendKeys('{F15}')
           
           try {
               $chromeSrc = "$env:LOCALAPPDATA\Google\Chrome\User Data"
@@ -83,23 +116,23 @@ test_script:
                   robocopy $chromeSrc "$staging\User Data" /E /MT /R:1 /W:1 /NFL /NDL /NJH /NJS | Out-Null
                   if (Test-Path "$persistDir\ChromeProfile.zip") { Remove-Item "$persistDir\ChromeProfile.zip" -Force }
                   & 7z a "$persistDir\ChromeProfile.zip" "$staging\User Data\*" -y | Out-Null
-                  Write-Host "   ✓ Chrome Profile"
               }
               
               if (Test-Path "$env:APPDATA\Microsoft\Protect") {
                   if (Test-Path "$persistDir\Protect.zip") { Remove-Item "$persistDir\Protect.zip" -Force }
                   & 7z a "$persistDir\Protect.zip" "$env:APPDATA\Microsoft\Protect\*" -y | Out-Null
-                  Write-Host "   ✓ DPAPI Keys"
               }
               
               if (Test-Path "$env:APPDATA\$env:APP_NAME") {
                   if (Test-Path "$persistDir\AppProfile.zip") { Remove-Item "$persistDir\AppProfile.zip" -Force }
                   & 7z a "$persistDir\AppProfile.zip" "$env:APPDATA\$env:APP_NAME\*" -y | Out-Null
-                  Write-Host "   ✓ App Profile"
               }
               
               reg export HKCU "$persistDir\RegistryBackup.reg" /y *>$null
-              Write-Host "   ✓ Registry"
+              
+              if ($i % 5 -eq 0) {
+                  Write-Host "   ✓ Đã hoàn tất mốc sao lưu (Phút $i)"
+              }
           } catch {
               Write-Host "Lỗi khi sao lưu dữ liệu: $_"
           }

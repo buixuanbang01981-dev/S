@@ -1,14 +1,14 @@
-# AppVeyor Persistent RDP Session (Antigravity) v4.1
+# AppVeyor Persistent RDP Session (Antigravity) v5.0 (Ultimate Edition)
 
 Dự án này cung cấp cấu hình để thiết lập một môi trường Windows trên AppVeyor với khả năng truy cập RDP và **duy trì dữ liệu đăng nhập** (Cookies, Passwords, Sessions) xuyên suốt các phiên làm việc.
 
-## Các tính năng chính (Nâng cấp v4.1)
+## Các tính năng "Xịn Xò" Mới (Nâng cấp v5.0)
+- **Hỗ Trợ Ngrok Tunnel**: Nếu cổng RDP bị chặn, bạn có thể nhập `NGROK_AUTH_TOKEN` vào `appveyor.yml` để tự động tạo một đường truyền ngrok, hiển thị URL truy cập trực tiếp cực nhanh.
+- **Tối Ưu Hóa Sức Mạnh Máy Ảo (Performance Booster)**: Tự động vô hiệu hóa Windows Defender (Antivirus) và Windows Search. Giúp lấy lại 100% sức mạnh CPU và tốc độ đọc/ghi ổ cứng cho công việc của bạn.
+- **Hệ Thống Chống Ngủ Đông (Anti-AFK)**: Máy ảo có thể duy trì hoạt động liên tục lên tới **6 tiếng** (tùy giới hạn của AppVeyor). Script sẽ tự động gửi phím êm (F15) để chống hệ thống bị lock màn hình.
+- **Shortcut Tự Động**: Tạo sẵn biểu tượng ứng dụng Antigravity ngoài màn hình Desktop để bạn chỉ cần click là chạy, không phải đi tìm file nữa.
 - **Turbo Backup/Restore**: Thay thế module nén mặc định bằng **7-Zip** (`7z`), giúp giảm đáng kể thời gian nén/giải nén profile Chrome và dữ liệu, tăng tốc quá trình khởi tạo và lưu trữ.
-- **Robust Error Handling**: Thêm Try-Catch để đảm bảo script không bị crash giữa chừng khi sao lưu hoặc khôi phục dữ liệu.
-- **RDP Access**: Cho phép truy cập từ xa vào máy ảo Windows của AppVeyor.
-- **Smart Auto-Backup**: Tự động sao lưu dữ liệu mỗi **5 phút** một lần vào Cache. Bạn không cần phải nhớ chạy file backup thủ công nữa.
-- **File Lock Protection**: Sử dụng công nghệ `robocopy` để sao lưu ngay cả khi Chrome đang mở mà không gây lỗi.
-- **DPAPI Persistence**: Khôi phục chính xác các khóa giải mã của Windows để giữ trạng thái đăng nhập tài khoản.
+- **Robust Error Handling**: Thêm Try-Catch để đảm bảo script không bị crash giữa chừng.
 
 ## Hướng dẫn sử dụng
 1. **Khởi chạy**: Đẩy code lên GitHub hoặc kích hoạt build trên AppVeyor.
