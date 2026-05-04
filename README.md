@@ -1,8 +1,9 @@
-# AppVeyor Persistent RDP Session (Antigravity) v3.0
+# AppVeyor Persistent RDP Session (Antigravity) v4.0
 
 Dự án này cung cấp cấu hình để thiết lập một môi trường Windows trên AppVeyor với khả năng truy cập RDP và **duy trì dữ liệu đăng nhập** (Cookies, Passwords, Sessions) xuyên suốt các phiên làm việc.
 
-## Các tính năng chính (Nâng cấp v3.0)
+## Các tính năng chính (Nâng cấp v4.0)
+- **Robust Error Handling**: Thêm Try-Catch để đảm bảo script không bị crash giữa chừng khi sao lưu hoặc khôi phục dữ liệu.
 - **RDP Access**: Cho phép truy cập từ xa vào máy ảo Windows của AppVeyor.
 - **Smart Auto-Backup**: Tự động sao lưu dữ liệu mỗi **5 phút** một lần vào Cache. Bạn không cần phải nhớ chạy file backup thủ công nữa.
 - **File Lock Protection**: Sử dụng công nghệ `robocopy` để sao lưu ngay cả khi Chrome đang mở mà không gây lỗi.

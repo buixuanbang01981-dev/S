@@ -1,4 +1,4 @@
-version: 3.0.{build}
+version: 4.0.{build}
 image: Visual Studio 2019
 
 environment:
@@ -16,30 +16,34 @@ init:
 
 install:
   - ps: |
-      Write-Host "=== HỆ THỐNG KHÔI PHỤC DỮ LIỆU V3.1 ==="
+      Write-Host "=== HỆ THỐNG KHÔI PHỤC DỮ LIỆU V4.0 ==="
       $persistDir = "C:\Persistence"
       if (!(Test-Path $persistDir)) { New-Item -ItemType Directory -Path $persistDir -Force | Out-Null }
 
-      if (Test-Path "$persistDir\ChromeProfile.zip") {
-          Write-Host "> Đang khôi phục Chrome Profile..."
-          $chromeBase = "$env:LOCALAPPDATA\Google\Chrome"
-          if (!(Test-Path $chromeBase)) { New-Item -ItemType Directory -Path $chromeBase -Force | Out-Null }
-          Expand-Archive -Path "$persistDir\ChromeProfile.zip" -DestinationPath $chromeBase -Force
-      }
+      try {
+          if (Test-Path "$persistDir\ChromeProfile.zip") {
+              Write-Host "> Đang khôi phục Chrome Profile..."
+              $chromeBase = "$env:LOCALAPPDATA\Google\Chrome"
+              if (!(Test-Path $chromeBase)) { New-Item -ItemType Directory -Path $chromeBase -Force | Out-Null }
+              Expand-Archive -Path "$persistDir\ChromeProfile.zip" -DestinationPath $chromeBase -Force
+          }
 
-      if (Test-Path "$persistDir\Protect.zip") {
-          Write-Host "> Đang khôi phục DPAPI Keys..."
-          Expand-Archive -Path "$persistDir\Protect.zip" -DestinationPath "$env:APPDATA\Microsoft" -Force
-      }
+          if (Test-Path "$persistDir\Protect.zip") {
+              Write-Host "> Đang khôi phục DPAPI Keys..."
+              Expand-Archive -Path "$persistDir\Protect.zip" -DestinationPath "$env:APPDATA\Microsoft" -Force
+          }
 
-      if (Test-Path "$persistDir\AppProfile.zip") {
-          Write-Host "> Đang khôi phục App Profile..."
-          Expand-Archive -Path "$persistDir\AppProfile.zip" -DestinationPath "$env:APPDATA" -Force
-      }
+          if (Test-Path "$persistDir\AppProfile.zip") {
+              Write-Host "> Đang khôi phục App Profile..."
+              Expand-Archive -Path "$persistDir\AppProfile.zip" -DestinationPath "$env:APPDATA" -Force
+          }
 
-      if (Test-Path "$persistDir\RegistryBackup.reg") {
-          Write-Host "> Đang khôi phục Registry..."
-          reg import "$persistDir\RegistryBackup.reg" *>$null
+          if (Test-Path "$persistDir\RegistryBackup.reg") {
+              Write-Host "> Đang khôi phục Registry..."
+              reg import "$persistDir\RegistryBackup.reg" *>$null
+          }
+      } catch {
+          Write-Host "Lỗi khi khôi phục dữ liệu: $_"
       }
 
       if (!(Test-Path "C:\Program Files\Google\Chrome\Application\chrome.exe")) {
@@ -73,25 +77,29 @@ test_script:
           
           Write-Host "--- Sao lưu định kỳ (phút $i) ---"
           
-          $chromeSrc = "$env:LOCALAPPDATA\Google\Chrome\User Data"
-          if (Test-Path $chromeSrc) {
-              robocopy $chromeSrc "$staging\User Data" /E /MT /R:1 /W:1 /NFL /NDL /NJH /NJS | Out-Null
-              Compress-Archive -Path "$staging\User Data" -DestinationPath "$persistDir\ChromeProfile.zip" -Force
-              Write-Host "   ✓ Chrome Profile"
+          try {
+              $chromeSrc = "$env:LOCALAPPDATA\Google\Chrome\User Data"
+              if (Test-Path $chromeSrc) {
+                  robocopy $chromeSrc "$staging\User Data" /E /MT /R:1 /W:1 /NFL /NDL /NJH /NJS | Out-Null
+                  Compress-Archive -Path "$staging\User Data" -DestinationPath "$persistDir\ChromeProfile.zip" -Force
+                  Write-Host "   ✓ Chrome Profile"
+              }
+              
+              if (Test-Path "$env:APPDATA\Microsoft\Protect") {
+                  Compress-Archive -Path "$env:APPDATA\Microsoft\Protect" -DestinationPath "$persistDir\Protect.zip" -Force
+                  Write-Host "   ✓ DPAPI Keys"
+              }
+              
+              if (Test-Path "$env:APPDATA\$env:APP_NAME") {
+                  Compress-Archive -Path "$env:APPDATA\$env:APP_NAME" -DestinationPath "$persistDir\AppProfile.zip" -Force
+                  Write-Host "   ✓ App Profile"
+              }
+              
+              reg export HKCU "$persistDir\RegistryBackup.reg" /y *>$null
+              Write-Host "   ✓ Registry"
+          } catch {
+              Write-Host "Lỗi khi sao lưu dữ liệu: $_"
           }
-          
-          if (Test-Path "$env:APPDATA\Microsoft\Protect") {
-              Compress-Archive -Path "$env:APPDATA\Microsoft\Protect" -DestinationPath "$persistDir\Protect.zip" -Force
-              Write-Host "   ✓ DPAPI Keys"
-          }
-          
-          if (Test-Path "$env:APPDATA\$env:APP_NAME") {
-              Compress-Archive -Path "$env:APPDATA\$env:APP_NAME" -DestinationPath "$persistDir\AppProfile.zip" -Force
-              Write-Host "   ✓ App Profile"
-          }
-          
-          reg export HKCU "$persistDir\RegistryBackup.reg" /y *>$null
-          Write-Host "   ✓ Registry"
           
           Start-Sleep -Seconds 60
       }
