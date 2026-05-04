@@ -1,12 +1,32 @@
-version: 5.0.{build}
+version: 7.0.{build}
 image: Visual Studio 2019
+
+# Tăng tốc khởi tạo: clone nông thay vì tải toàn bộ lịch sử git
+shallow_clone: true
+clone_depth: 1
+
+# Chỉ build trên nhánh main, không build tag
+branches:
+  only:
+    - main
+
+skip_tags: true
+
+# Giới hạn 1 job chạy cùng lúc để không bị xung đột cache
+max_jobs: 1
 
 environment:
   APPVEYOR_RDP_PASSWORD: HieuDz@123456
   APP_NAME: Antigravity
   APP_DOWNLOAD_URL: https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/1.23.2-4781536860569600/windows-x64/Antigravity.exe
   APPVEYOR_SAVE_CACHE_ON_ERROR: true
-  NGROK_AUTH_TOKEN: "" # Điền token ngrok của bạn vào đây nếu muốn dùng ngrok tunnel
+  NGROK_AUTH_TOKEN: ""
+  # Bật biến này thành "true" nếu muốn tải lại Chrome từ đầu mỗi phiên
+  FORCE_REINSTALL_CHROME: "false"
+
+# Kết thúc build ngay nếu có lỗi nghiêm trọng
+matrix:
+  fast_finish: true
 
 cache:
   - C:\Persistence -> appveyor.yml
@@ -15,142 +35,315 @@ cache:
 init:
   - ps: iex ((new-object net.webclient).DownloadString('https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1'))
   - ps: |
-      Write-Host "=== TỐI ƯU HÓA HỆ THỐNG (Performance Booster) ==="
-      # Tắt Windows Defender để giải phóng CPU và RAM
-      Set-MpPreference -DisableRealtimeMonitoring $true
-      Set-MpPreference -DisableBehaviorMonitoring $true
-      Set-MpPreference -DisableBlockAtFirstSight $true
-      Set-MpPreference -DisableIOAVProtection $true
-      # Tắt dịch vụ không cần thiết
-      Stop-Service -Name "wsearch" -Force -WarningAction SilentlyContinue | Out-Null
-      Set-Service -Name "wsearch" -StartupType Disabled -WarningAction SilentlyContinue | Out-Null
+      Write-Host "=========================================="
+      Write-Host "  ANTIGRAVITY RDP v7.0 - MAXIMUM EDITION"
+      Write-Host "=========================================="
+
+      # === SYSTEM INFO DASHBOARD ===
+      $os = (Get-CimInstance Win32_OperatingSystem)
+      $cpu = (Get-CimInstance Win32_Processor)
+      $ramTotal = [math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
+      $ramFree = [math]::Round($os.FreePhysicalMemory / 1MB, 1)
+      $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
+      $diskFree = [math]::Round($disk.FreeSpace / 1GB, 1)
+      $diskTotal = [math]::Round($disk.Size / 1GB, 1)
+
+      Write-Host "--- Thông tin Máy Ảo ---"
+      Write-Host "  OS      : $($os.Caption)"
+      Write-Host "  CPU     : $($cpu.Name)"
+      Write-Host "  RAM     : $ramFree GB free / $ramTotal GB total"
+      Write-Host "  Disk C  : $diskFree GB free / $diskTotal GB total"
+      Write-Host "  Hostname: $env:COMPUTERNAME"
+      Write-Host "------------------------"
+
+      Add-AppveyorMessage -Message "VM Info: CPU=$($cpu.Name) | RAM=${ramTotal}GB | Disk=${diskFree}GB free" -Category Information
+
+      # === PERFORMANCE BOOSTER ===
+      Write-Host "> Tối ưu hóa hiệu năng hệ thống..."
+
+      # Tắt Windows Defender Realtime
+      try {
+          Set-MpPreference -DisableRealtimeMonitoring $true
+          Set-MpPreference -DisableBehaviorMonitoring $true
+          Set-MpPreference -DisableBlockAtFirstSeen $true
+          Set-MpPreference -DisableIOAVProtection $true
+          Write-Host "  ✓ Đã tắt Windows Defender Realtime"
+      } catch { Write-Host "  ⚠ Không thể tắt Defender (có thể không có quyền)" }
+
+      # Tắt các dịch vụ ngốn tài nguyên
+      $services = @("wsearch", "DiagTrack", "SysMain", "WerSvc", "MapsBroker")
+      foreach ($svc in $services) {
+          try {
+              Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue
+              Set-Service -Name $svc -StartupType Disabled -ErrorAction SilentlyContinue
+          } catch {}
+      }
+      Write-Host "  ✓ Đã tắt các dịch vụ không cần thiết (Search, Telemetry, Superfetch, Error Reporting, Maps)"
+
+      # Chỉnh Power Plan thành High Performance
+      powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c 2>$null
+      Write-Host "  ✓ Đã chuyển Power Plan sang High Performance"
+
+      # Tắt hiệu ứng đồ họa để tiết kiệm RAM
+      Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -ErrorAction SilentlyContinue
+      Write-Host "  ✓ Đã tắt hiệu ứng đồ họa Windows (Adjust for best performance)"
 
 install:
   - ps: |
-      Write-Host "=== HỆ THỐNG KHÔI PHỤC DỮ LIỆU V5.0 (Ultimate Edition) ==="
+      Write-Host "=== GIAI ĐOẠN KHÔI PHỤC DỮ LIỆU ==="
       $persistDir = "C:\Persistence"
+      $logFile = "$persistDir\restore_log.txt"
       if (!(Test-Path $persistDir)) { New-Item -ItemType Directory -Path $persistDir -Force | Out-Null }
+      
+      $restoreLog = @()
+      $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
+      # --- Khôi phục Chrome Profile ---
       try {
-          if (Test-Path "$persistDir\ChromeProfile.zip") {
+          if (Test-Path "$persistDir\ChromeProfile.7z") {
               Write-Host "> Đang khôi phục Chrome Profile..."
               $chromeBase = "$env:LOCALAPPDATA\Google\Chrome"
               if (!(Test-Path $chromeBase)) { New-Item -ItemType Directory -Path $chromeBase -Force | Out-Null }
-              & 7z x "$persistDir\ChromeProfile.zip" -o"$chromeBase" -y | Out-Null
+              & 7z x "$persistDir\ChromeProfile.7z" -o"$chromeBase" -y -mmt=on | Out-Null
+              $size = [math]::Round((Get-Item "$persistDir\ChromeProfile.7z").Length / 1MB, 1)
+              $restoreLog += "ChromeProfile: ${size}MB"
+              Write-Host "  ✓ Chrome Profile (${size}MB)"
           }
+      } catch { Write-Host "  ✗ Lỗi khôi phục Chrome: $_" }
 
-          if (Test-Path "$persistDir\Protect.zip") {
+      # --- Khôi phục DPAPI Keys ---
+      try {
+          if (Test-Path "$persistDir\Protect.7z") {
               Write-Host "> Đang khôi phục DPAPI Keys..."
-              & 7z x "$persistDir\Protect.zip" -o"$env:APPDATA\Microsoft" -y | Out-Null
+              & 7z x "$persistDir\Protect.7z" -o"$env:APPDATA\Microsoft" -y -mmt=on | Out-Null
+              $restoreLog += "DPAPI: OK"
+              Write-Host "  ✓ DPAPI Keys"
           }
+      } catch { Write-Host "  ✗ Lỗi khôi phục DPAPI: $_" }
 
-          if (Test-Path "$persistDir\AppProfile.zip") {
+      # --- Khôi phục App Profile ---
+      try {
+          if (Test-Path "$persistDir\AppProfile.7z") {
               Write-Host "> Đang khôi phục App Profile..."
-              & 7z x "$persistDir\AppProfile.zip" -o"$env:APPDATA" -y | Out-Null
+              & 7z x "$persistDir\AppProfile.7z" -o"$env:APPDATA" -y -mmt=on | Out-Null
+              $restoreLog += "AppProfile: OK"
+              Write-Host "  ✓ App Profile"
           }
+      } catch { Write-Host "  ✗ Lỗi khôi phục App: $_" }
 
+      # --- Khôi phục Registry ---
+      try {
           if (Test-Path "$persistDir\RegistryBackup.reg") {
               Write-Host "> Đang khôi phục Registry..."
               reg import "$persistDir\RegistryBackup.reg" *>$null
+              $restoreLog += "Registry: OK"
+              Write-Host "  ✓ Registry"
           }
-      } catch {
-          Write-Host "Lỗi khi khôi phục dữ liệu: $_"
-      }
+      } catch { Write-Host "  ✗ Lỗi khôi phục Registry: $_" }
 
-      if (!(Test-Path "C:\Program Files\Google\Chrome\Application\chrome.exe")) {
+      # --- Khôi phục Desktop Shortcuts & Wallpaper ---
+      try {
+          if (Test-Path "$persistDir\Desktop.7z") {
+              Write-Host "> Đang khôi phục Desktop..."
+              & 7z x "$persistDir\Desktop.7z" -o"$env:USERPROFILE\Desktop" -y -mmt=on | Out-Null
+              $restoreLog += "Desktop: OK"
+              Write-Host "  ✓ Desktop Shortcuts"
+          }
+      } catch { Write-Host "  ✗ Lỗi khôi phục Desktop: $_" }
+
+      $sw.Stop()
+      $restoreTime = $sw.Elapsed.TotalSeconds
+      Write-Host "--- Khôi phục hoàn tất trong $([math]::Round($restoreTime, 1)) giây ---"
+      Add-AppveyorMessage -Message "Khôi phục dữ liệu: $([math]::Round($restoreTime, 1))s | $($restoreLog -join ' | ')" -Category Information
+
+      # === CÀI ĐẶT PHẦN MỀM ===
+      Write-Host "=== CÀI ĐẶT PHẦN MỀM ==="
+
+      # Chrome
+      if ($env:FORCE_REINSTALL_CHROME -eq "true" -or !(Test-Path "C:\Program Files\Google\Chrome\Application\chrome.exe")) {
           Write-Host "> Đang cài đặt Chrome..."
           Invoke-WebRequest -UseBasicParsing -Uri "https://dl.google.com/chrome/install/ChromeStandaloneSetup64.exe" -OutFile "C:\chrome_setup.exe"
           Start-Process "C:\chrome_setup.exe" -ArgumentList "/silent /install" -Wait
+          Remove-Item "C:\chrome_setup.exe" -Force -ErrorAction SilentlyContinue
+          Write-Host "  ✓ Chrome đã được cài đặt"
+      } else {
+          Write-Host "  ✓ Chrome đã tồn tại, bỏ qua"
       }
 
+      # Ứng dụng chính
       $appExe = "C:\Tools\$env:APP_NAME\$env:APP_NAME.exe"
       if (!(Test-Path $appExe)) {
           New-Item -ItemType Directory -Path "C:\Tools\$env:APP_NAME" -Force | Out-Null
           Write-Host "> Đang tải ứng dụng $env:APP_NAME..."
           Invoke-WebRequest -UseBasicParsing -Uri $env:APP_DOWNLOAD_URL -OutFile $appExe
+          Write-Host "  ✓ $env:APP_NAME đã được tải"
+      } else {
+          Write-Host "  ✓ $env:APP_NAME đã tồn tại, bỏ qua"
       }
-      
-      # Tạo Shortcut ra Desktop cho tiện sử dụng
+
+      # Tạo Shortcuts ra Desktop
       $WshShell = New-Object -comObject WScript.Shell
+
       $Shortcut = $WshShell.CreateShortcut("$env:USERPROFILE\Desktop\$env:APP_NAME.lnk")
       $Shortcut.TargetPath = $appExe
       $Shortcut.Save()
+
+      $Shortcut2 = $WshShell.CreateShortcut("$env:USERPROFILE\Desktop\Chrome.lnk")
+      $Shortcut2.TargetPath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+      $Shortcut2.Save()
+
+      Write-Host "  ✓ Đã tạo Shortcuts ra Desktop"
 
 build: off
 
 test_script:
   - ps: |
-      Write-Host "=== RDP ĐÃ SẴN SÀNG ==="
+      Write-Host "============================================"
+      Write-Host "  RDP ĐÃ SẴN SÀNG - KẾT NỐI NGAY!"
+      Write-Host "============================================"
       Write-Host "Mật khẩu RDP: $env:APPVEYOR_RDP_PASSWORD"
-      Add-AppveyorMessage -Message "Mật khẩu RDP: $env:APPVEYOR_RDP_PASSWORD" -Category Information
-      
-      if ($env:NGROK_AUTH_TOKEN -ne "") {
+      Add-AppveyorMessage -Message "RDP Password: $env:APPVEYOR_RDP_PASSWORD" -Category Information
+
+      # === NGROK TUNNEL ===
+      if ($env:NGROK_AUTH_TOKEN -and $env:NGROK_AUTH_TOKEN -ne "") {
           Write-Host "=== KÍCH HOẠT NGROK TUNNEL ==="
-          Invoke-WebRequest -UseBasicParsing -Uri "https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip" -OutFile "C:\ngrok.zip"
-          & 7z x "C:\ngrok.zip" -oC:\ -y | Out-Null
-          C:\ngrok.exe authtoken $env:NGROK_AUTH_TOKEN
-          Start-Process -FilePath "C:\ngrok.exe" -ArgumentList "tcp 3389" -WindowStyle Hidden
-          Start-Sleep -Seconds 5
           try {
+              Invoke-WebRequest -UseBasicParsing -Uri "https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip" -OutFile "C:\ngrok.zip"
+              & 7z x "C:\ngrok.zip" -oC:\ -y | Out-Null
+              C:\ngrok.exe authtoken $env:NGROK_AUTH_TOKEN
+              Start-Process -FilePath "C:\ngrok.exe" -ArgumentList "tcp 3389" -WindowStyle Hidden
+              Start-Sleep -Seconds 5
               $ngrokUrl = (Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels").tunnels[0].public_url
               Write-Host "Ngrok RDP URL: $ngrokUrl"
-              Add-AppveyorMessage -Message "Ngrok RDP URL: $ngrokUrl" -Category Information
+              Add-AppveyorMessage -Message "Ngrok RDP: $ngrokUrl" -Category Information
           } catch {
-              Write-Host "Lỗi khi lấy Ngrok URL."
+              Write-Host "⚠ Lỗi khi kích hoạt Ngrok: $_"
           }
       }
-      
-      Write-Host "Hệ thống hỗ trợ treo tối đa theo giới hạn gói AppVeyor của bạn (Mặc định 60 phút, tối đa 360). Dữ liệu tự động lưu mỗi phút."
-      
+
+      # === BACKUP ENGINE ===
       $persistDir = "C:\Persistence"
       $staging = "C:\Staging"
       if (!(Test-Path $staging)) { New-Item -ItemType Directory -Path $staging -Force | Out-Null }
-      
+
       $wsh = New-Object -ComObject WScript.Shell
-      
+      $backupCount = 0
+      $totalBackupTime = 0
+
       for ($i = 1; $i -le 360; $i++) {
           $time = Get-Date -Format "HH:mm:ss"
-          Write-Host "[$time] Session hoạt động... (Phút $i/360)"
-          
-          # Gửi phím F15 để chống ngủ đông (Anti-AFK)
+
+          # Anti-AFK: gửi phím F15 mỗi phút
           $wsh.SendKeys('{F15}')
-          
-          try {
-              $chromeSrc = "$env:LOCALAPPDATA\Google\Chrome\User Data"
-              if (Test-Path $chromeSrc) {
-                  robocopy $chromeSrc "$staging\User Data" /E /MT /R:1 /W:1 /NFL /NDL /NJH /NJS | Out-Null
-                  if (Test-Path "$persistDir\ChromeProfile.zip") { Remove-Item "$persistDir\ChromeProfile.zip" -Force }
-                  & 7z a "$persistDir\ChromeProfile.zip" "$staging\User Data\*" -y | Out-Null
+
+          # === SMART BACKUP: chỉ backup mỗi 2 phút thay vì mỗi phút (giảm tải CPU) ===
+          if ($i % 2 -eq 0) {
+              $bsw = [System.Diagnostics.Stopwatch]::StartNew()
+
+              try {
+                  # Chrome Profile
+                  $chromeSrc = "$env:LOCALAPPDATA\Google\Chrome\User Data"
+                  if (Test-Path $chromeSrc) {
+                      robocopy $chromeSrc "$staging\User Data" /E /MT /R:1 /W:1 /NFL /NDL /NJH /NJS /XD "Service Worker" "Code Cache" "GPUCache" "ShaderCache" "GrShaderCache" | Out-Null
+                      if (Test-Path "$persistDir\ChromeProfile.7z") { Remove-Item "$persistDir\ChromeProfile.7z" -Force }
+                      & 7z a "$persistDir\ChromeProfile.7z" "$staging\User Data\*" -y -mx=1 -mmt=on | Out-Null
+                  }
+
+                  # DPAPI Keys
+                  if (Test-Path "$env:APPDATA\Microsoft\Protect") {
+                      if (Test-Path "$persistDir\Protect.7z") { Remove-Item "$persistDir\Protect.7z" -Force }
+                      & 7z a "$persistDir\Protect.7z" "$env:APPDATA\Microsoft\Protect\*" -y -mx=1 -mmt=on | Out-Null
+                  }
+
+                  # App Profile
+                  if (Test-Path "$env:APPDATA\$env:APP_NAME") {
+                      if (Test-Path "$persistDir\AppProfile.7z") { Remove-Item "$persistDir\AppProfile.7z" -Force }
+                      & 7z a "$persistDir\AppProfile.7z" "$env:APPDATA\$env:APP_NAME\*" -y -mx=1 -mmt=on | Out-Null
+                  }
+
+                  # Desktop (lưu cả shortcuts và file trên Desktop)
+                  $desktopPath = "$env:USERPROFILE\Desktop"
+                  if (Test-Path $desktopPath) {
+                      if (Test-Path "$persistDir\Desktop.7z") { Remove-Item "$persistDir\Desktop.7z" -Force }
+                      & 7z a "$persistDir\Desktop.7z" "$desktopPath\*" -y -mx=1 -mmt=on | Out-Null
+                  }
+
+                  # Registry
+                  reg export HKCU "$persistDir\RegistryBackup.reg" /y *>$null
+
+                  $backupCount++
+                  $bsw.Stop()
+                  $totalBackupTime += $bsw.Elapsed.TotalSeconds
+
+              } catch {
+                  Write-Host "⚠ Lỗi backup (phút $i): $_"
               }
-              
-              if (Test-Path "$env:APPDATA\Microsoft\Protect") {
-                  if (Test-Path "$persistDir\Protect.zip") { Remove-Item "$persistDir\Protect.zip" -Force }
-                  & 7z a "$persistDir\Protect.zip" "$env:APPDATA\Microsoft\Protect\*" -y | Out-Null
+
+              # Hiển thị chi tiết mỗi 10 phút
+              if ($i % 10 -eq 0) {
+                  $avgTime = if ($backupCount -gt 0) { [math]::Round($totalBackupTime / $backupCount, 1) } else { 0 }
+                  $cacheSize = if (Test-Path "$persistDir\ChromeProfile.7z") { [math]::Round((Get-Item "$persistDir\ChromeProfile.7z").Length / 1MB, 1) } else { 0 }
+                  Write-Host "[$time] ✓ Backup #$backupCount hoàn tất | Chrome: ${cacheSize}MB | Avg: ${avgTime}s/lần"
+                  Update-AppveyorBuild -Version "7.0.$env:APPVEYOR_BUILD_NUMBER [Phút $i | Backup #$backupCount]"
               }
-              
-              if (Test-Path "$env:APPDATA\$env:APP_NAME") {
-                  if (Test-Path "$persistDir\AppProfile.zip") { Remove-Item "$persistDir\AppProfile.zip" -Force }
-                  & 7z a "$persistDir\AppProfile.zip" "$env:APPDATA\$env:APP_NAME\*" -y | Out-Null
-              }
-              
-              reg export HKCU "$persistDir\RegistryBackup.reg" /y *>$null
-              
-              if ($i % 5 -eq 0) {
-                  Write-Host "   ✓ Đã hoàn tất mốc sao lưu (Phút $i)"
-              }
-          } catch {
-              Write-Host "Lỗi khi sao lưu dữ liệu: $_"
           }
-          
+
+          # Hiển thị heartbeat mỗi 5 phút
+          if ($i % 5 -eq 0) {
+              $ramNow = [math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1MB, 1)
+              Write-Host "[$time] ♥ Session alive (Phút $i/360) | RAM Free: ${ramNow}GB"
+          }
+
           Start-Sleep -Seconds 60
       }
 
+# Chạy khi build THÀNH CÔNG (hết giờ bình thường)
+on_success:
+  - ps: |
+      Add-AppveyorMessage -Message "Session kết thúc thành công! Dữ liệu đã được lưu." -Category Information
+
+# Chạy khi build THẤT BẠI (bị lỗi hoặc timeout cứng)
+on_failure:
+  - ps: |
+      Write-Host "=== EMERGENCY BACKUP (Build bị lỗi) ==="
+      $persistDir = "C:\Persistence"
+      try {
+          $chromeSrc = "$env:LOCALAPPDATA\Google\Chrome\User Data"
+          if (Test-Path $chromeSrc) {
+              if (Test-Path "$persistDir\ChromeProfile.7z") { Remove-Item "$persistDir\ChromeProfile.7z" -Force }
+              & 7z a "$persistDir\ChromeProfile.7z" "$chromeSrc\*" -y -mx=1 -mmt=on -xr!"Service Worker" -xr!"Code Cache" -xr!"GPUCache" | Out-Null
+              Write-Host "✓ Emergency Chrome backup done"
+          }
+          reg export HKCU "$persistDir\RegistryBackup.reg" /y *>$null
+      } catch {
+          Write-Host "✗ Emergency backup failed: $_"
+      }
+      Add-AppveyorMessage -Message "⚠ Build thất bại nhưng đã cố cứu dữ liệu!" -Category Warning
+
+# Chạy LUÔN LUÔN, dù thành công hay thất bại (đẩy lên Artifacts)
 on_finish:
   - ps: |
-      Write-Host "=== LƯU TRỮ DỮ LIỆU LÊN ARTIFACTS TRƯỚC KHI TẮT MÁY ==="
+      Write-Host "=== ĐẨY DỮ LIỆU LÊN ARTIFACTS ==="
       $persistDir = "C:\Persistence"
-      if (Test-Path "$persistDir\ChromeProfile.zip") { Push-AppveyorArtifact "$persistDir\ChromeProfile.zip" -FileName "ChromeProfile_Backup.zip" }
-      if (Test-Path "$persistDir\Protect.zip") { Push-AppveyorArtifact "$persistDir\Protect.zip" -FileName "Protect_DPAPI_Backup.zip" }
-      if (Test-Path "$persistDir\AppProfile.zip") { Push-AppveyorArtifact "$persistDir\AppProfile.zip" -FileName "AppProfile_Backup.zip" }
-      if (Test-Path "$persistDir\RegistryBackup.reg") { Push-AppveyorArtifact "$persistDir\RegistryBackup.reg" -FileName "Registry_Backup.reg" }
-      Write-Host "✓ Toàn bộ dữ liệu đã được nén và đẩy lên mục Artifacts của AppVeyor."
+      $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+
+      $files = @(
+          @{ Path = "$persistDir\ChromeProfile.7z"; Name = "ChromeProfile_$timestamp.7z" },
+          @{ Path = "$persistDir\Protect.7z"; Name = "Protect_DPAPI_$timestamp.7z" },
+          @{ Path = "$persistDir\AppProfile.7z"; Name = "AppProfile_$timestamp.7z" },
+          @{ Path = "$persistDir\Desktop.7z"; Name = "Desktop_$timestamp.7z" },
+          @{ Path = "$persistDir\RegistryBackup.reg"; Name = "Registry_$timestamp.reg" }
+      )
+
+      $uploaded = 0
+      foreach ($f in $files) {
+          if (Test-Path $f.Path) {
+              $size = [math]::Round((Get-Item $f.Path).Length / 1MB, 2)
+              Push-AppveyorArtifact $f.Path -FileName $f.Name
+              Write-Host "  ✓ $($f.Name) (${size}MB)"
+              $uploaded++
+          }
+      }
+
+      Write-Host "=== Đã tải $uploaded file lên Artifacts ==="
+      Add-AppveyorMessage -Message "Artifacts: $uploaded file đã được upload thành công" -Category Information
