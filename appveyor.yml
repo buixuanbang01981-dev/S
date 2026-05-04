@@ -16,11 +16,11 @@ init:
 
 install:
   - ps: |
-      Write-Host "=== HỆ THỐNG KHÔI PHỤC DỮ LIỆU V3.0 ==="
+      Write-Host "=== HỆ THỐNG KHÔI PHỤC DỮ LIỆU V3.1 ==="
       $persistDir = "C:\Persistence"
       if (!(Test-Path $persistDir)) { New-Item -ItemType Directory -Path $persistDir -Force | Out-Null }
 
-      # 1. Giải nén dữ liệu Chrome (Sửa lỗi đường dẫn)
+      # 1. Giải nén dữ liệu Chrome
       if (Test-Path "$persistDir\ChromeProfile.zip") {
           Write-Host "> Đang khôi phục Chrome Profile..."
           $chromeBase = "$env:LOCALAPPDATA\Google\Chrome"
@@ -28,7 +28,7 @@ install:
           Expand-Archive -Path "$persistDir\ChromeProfile.zip" -DestinationPath $chromeBase -Force
       }
 
-      # 2. Giải nén DPAPI Keys (Chìa khóa giải mã mật khẩu/cookies)
+      # 2. Giải nén DPAPI Keys
       if (Test-Path "$persistDir\Protect.zip") {
           Write-Host "> Đang khôi phục DPAPI Keys..."
           Expand-Archive -Path "$persistDir\Protect.zip" -DestinationPath "$env:APPDATA\Microsoft" -Force
@@ -40,14 +40,20 @@ install:
           Expand-Archive -Path "$persistDir\AppProfile.zip" -DestinationPath "$env:APPDATA" -Force
       }
 
-      # 4. Cài đặt Chrome nếu chưa có
+      # 4. Import Registry (nếu có)
+      if (Test-Path "$persistDir\RegistryBackup.reg") {
+          Write-Host "> Đang khôi phục Registry..."
+          reg import "$persistDir\RegistryBackup.reg" *>$null
+      }
+
+      # 5. Cài đặt Chrome nếu chưa có
       if (!(Test-Path "C:\Program Files\Google\Chrome\Application\chrome.exe")) {
           Write-Host "> Đang cài đặt Chrome..."
           Invoke-WebRequest -Uri "https://dl.google.com/chrome/install/ChromeStandaloneSetup64.exe" -OutFile "C:\chrome_setup.exe"
           Start-Process "C:\chrome_setup.exe" -ArgumentList "/silent /install" -Wait
       }
 
-      # 5. Tải ứng dụng Antigravity
+      # 6. Tải ứng dụng Antigravity
       $appExe = "C:\Tools\$env:APP_NAME\$env:APP_NAME.exe"
       if (!(Test-Path $appExe)) {
           New-Item -ItemType Directory -Path "C:\Tools\$env:APP_NAME" -Force | Out-Null
@@ -61,36 +67,43 @@ test:
   - ps: |
       Write-Host "=== RDP ĐÃ SẴN SÀNG ==="
       Write-Host "Mật khẩu RDP: $env:APPVEYOR_RDP_PASSWORD"
-      Write-Host "Dữ liệu sẽ được tự động sao lưu mỗi 5 phút."
+      Write-Host "Dữ liệu sẽ được tự động sao lưu mỗi PHÚT."
       
       $persistDir = "C:\Persistence"
       $staging = "C:\Staging"
       if (!(Test-Path $staging)) { New-Item -ItemType Directory -Path $staging -Force | Out-Null }
       
-      # Vòng lặp duy trì & TỰ ĐỘNG SAO LƯU THÔNG MINH
+      # Vòng lặp duy trì & TỰ ĐỘNG SAO LƯU MỖI PHÚT
       for ($i = 1; $i -le 60; $i++) {
           $time = Get-Date -Format "HH:mm:ss"
-          Write-Host "[$time] Session đang hoạt động... (Phút $i/60)"
+          Write-Host "[$time] Session hoạt động... (Phút $i/60)"
           
-          # SAO LƯU TỰ ĐỘNG MỖI 5 PHÚT
-          if ($i % 5 -eq 0) {
-              Write-Host "--- Đang thực hiện sao lưu định kỳ ---"
-              
-              # Copy Chrome User Data ra khu vực đệm (tránh file lock)
-              $chromeSrc = "$env:LOCALAPPDATA\Google\Chrome\User Data"
-              if (Test-Path $chromeSrc) {
-                  robocopy $chromeSrc "$staging\User Data" /E /MT /R:1 /W:1 /NFL /NDL /NJH /NJS | Out-Null
-                  Compress-Archive -Path "$staging\User Data" -DestinationPath "$persistDir\ChromeProfile.zip" -Force
-              }
-              
-              # Sao lưu Protect & App Profile
-              if (Test-Path "$env:APPDATA\Microsoft\Protect") {
-                  Compress-Archive -Path "$env:APPDATA\Microsoft\Protect" -DestinationPath "$persistDir\Protect.zip" -Force
-              }
-              if (Test-Path "$env:APPDATA\$env:APP_NAME") {
-                  Compress-Archive -Path "$env:APPDATA\$env:APP_NAME" -DestinationPath "$persistDir\AppProfile.zip" -Force
-              }
-              Write-Host "--- Đã cập nhật bản sao lưu mới vào Cache ---"
+          # SAO LƯU TỰ ĐỘNG MỖI PHÚT
+          Write-Host "--- Sao lưu định kỳ (phút $i) ---"
+          
+          # Copy Chrome User Data ra staging (tránh file lock)
+          $chromeSrc = "$env:LOCALAPPDATA\Google\Chrome\User Data"
+          if (Test-Path $chromeSrc) {
+              robocopy $chromeSrc "$staging\User Data" /E /MT /R:1 /W:1 /NFL /NDL /NJH /NJS | Out-Null
+              Compress-Archive -Path "$staging\User Data" -DestinationPath "$persistDir\ChromeProfile.zip" -Force
+              Write-Host "   ✓ Chrome Profile"
           }
+          
+          # Sao lưu DPAPI Keys
+          if (Test-Path "$env:APPDATA\Microsoft\Protect") {
+              Compress-Archive -Path "$env:APPDATA\Microsoft\Protect" -DestinationPath "$persistDir\Protect.zip" -Force
+              Write-Host "   ✓ DPAPI Keys"
+          }
+          
+          # Sao lưu App Profile
+          if (Test-Path "$env:APPDATA\$env:APP_NAME") {
+              Compress-Archive -Path "$env:APPDATA\$env:APP_NAME" -DestinationPath "$persistDir\AppProfile.zip" -Force
+              Write-Host "   ✓ App Profile"
+          }
+          
+          # Sao lưu Registry
+          reg export HKCU "$persistDir\RegistryBackup.reg" /y *>$null
+          Write-Host "   ✓ Registry"
+          
           Start-Sleep -Seconds 60
       }
